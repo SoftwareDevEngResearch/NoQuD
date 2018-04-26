@@ -9,8 +9,8 @@ def test_assign_key_length():
 
     """" Tests the key_length function from read_csv_input_file.py """
 
-    current_directory = os.path.abspath(__file__)
-    file_path = os.path.join(current_directory, '../AI_test.csv')
+    current_directory = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(current_directory, 'AI_test.csv')
 
     data = pd.read_csv(file_path, header = None)
     assembly_types = int(data.iloc[0, 1])
@@ -24,8 +24,8 @@ def test_create_material_map():
 
     """" Tests the create_material_length function from read_csv_input_file.py """
 
-    current_directory = os.path.abspath(__file__)
-    file_path = os.path.join(current_directory, '../AI_test.csv')
+    current_directory = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(current_directory, 'AI_test.csv')
 
     data = pd.read_csv(file_path, header=None)
     assemblies = int(data.iloc[1, 1])
@@ -53,9 +53,8 @@ def test_assign_cross_sections():
 
     """" Tests the assign_cross_sections function from read_csv_input_file.py """
 
-
-    current_directory = os.path.abspath(__file__)
-    file_path = os.path.join(current_directory, '../AI_test.csv')
+    current_directory = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(current_directory, 'AI_test.csv')
 
     data = pd.read_csv(file_path, header=None)
     groups = int(data.iloc[4, 1])  # number of neutron energy groups
