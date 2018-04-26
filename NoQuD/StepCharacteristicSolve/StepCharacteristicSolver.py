@@ -6,9 +6,6 @@
 import numpy
 import matplotlib.pyplot as plt
 from time import time
-from numba import jit
-import csv
-
 
 class StepCharacteristicSolver:
 
