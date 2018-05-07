@@ -7,4 +7,5 @@ pytest-cov
 numpy
 pandas
 matplotlib
+numba
 #

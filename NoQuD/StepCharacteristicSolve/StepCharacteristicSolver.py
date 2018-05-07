@@ -5,20 +5,48 @@
 
 import numpy
 import matplotlib.pyplot as plt
-from time import time
+from numba import jitclass, int64, float64
 
-class StepCharacteristicSolver:
+spec = [
+    ('sig_t', float64[:, :]),
+    ('sig_s_in', float64[:, :]),
+    ('sig_s_out', float64[:, :]),
+    ('sig_f', float64[:, :]),
+    ('nu', float64[:, :]),
+    ('chi', float64[:, :]),
+    ('ab', float64[:]),
+    ('weights', float64[:]),
+    ('groups', int64),
+    ('core_mesh_length', int64),
+    ('dx', float64),
+    ('dmu', float64),
+    ('flux_new', float64[:, :]),
+    ('flux_old', float64[:, :]),
+    ('phi_L_old', float64[:, :]),
+    ('phi_R_old', float64[:, :]),
+    ('angular_flux_edge', float64[:, :, :]),
+    ('angular_flux_center', float64[:, :, :]),
+    ('k_old', float64),
+    ('k_new', float64),
+    ('spatial_fission_old', float64[:, :]),
+    ('spatial_fission_new', float64[:, :]),
+    ('material', int64[:]),
+    ('exit1', int64),
+    ('exit2', int64),
+    ('flux_iterations', int64),
+    ('source_iterations', int64),
+    ('Q', float64[:, :]),
+    ('fission_source_dx', float64),
+    ('spatial_sig_s_out', float64[:, :])
 
-    # Define a default quadrature set to be used unless another is specified when an instance is intialized.
-    ab_default = [-0.9739065285171717, -0.8650633666889845, -0.6794095682990244, -0.4333953941292472, -0.1488743389816312,
-     0.1488743389816312, 0.4333953941292472, 0.6794095682990244, 0.8650633666889845, 0.9739065285171717]
+]
 
-    weights_default = numpy.array(
-        [0.0666713443086881, 0.1494513491505806, 0.2190863625159820, 0.2692667193099963, 0.2955242247147529,
-         0.2955242247147529, 0.2692667193099963, 0.2190863625159820, 0.1494513491505806, 0.0666713443086881])
+
+@jitclass(spec)
+class StepCharacteristicSolver(object):
 
     # Initialize and assign variables.
-    def __init__(self, sig_t, sig_s_in, sig_s_out, sig_f, nu, chi, ab = ab_default, weights = weights_default):
+    def __init__(self, sig_t, sig_s_in, sig_s_out, sig_f, nu, chi, groups, cells, cell_size, material):
 
         # Nuclear data
         self.sig_t = sig_t  # total cross section
@@ -29,46 +57,54 @@ class StepCharacteristicSolver:
         self.chi = chi  # probability of fission neutrons appearing in each group
 
         # Quadrature data
-        self.ab = ab
-        self.weights = weights
+        self.ab = numpy.array([-0.9739065285171717, -0.8650633666889845, -0.6794095682990244, -0.4333953941292472,
+                               -0.1488743389816312, 0.1488743389816312, 0.4333953941292472, 0.6794095682990244,
+                               0.8650633666889845, 0.9739065285171717], dtype=numpy.float64)
+        self.weights = numpy.array([0.0666713443086881, 0.1494513491505806, 0.2190863625159820, 0.2692667193099963,
+                                    0.2955242247147529, 0.2955242247147529, 0.2692667193099963, 0.2190863625159820,
+                                    0.1494513491505806, 0.0666713443086881], dtype=numpy.float64)
 
         # Problem geometry parameters
-        self.groups = 2  # energy groups in problem
-        self.core_mesh_length = 128  # number of intervals
-        #self.number_assemblies = 2  # number of assemblies in problem
-        self.dx = 20.0 / self.core_mesh_length  # discretization in length
+        self.groups = groups  # energy groups in problem
+        self.core_mesh_length = cells  # number of intervals
+        self.dx = cell_size  # discretization in length
         self.dmu = 2 / len(self.ab) # discretization in angle
 
         # Set initial values
-        self.flux_new = numpy.ones([self.groups, self.core_mesh_length])  # initialize flux
-        self.flux_old = numpy.ones([self.groups, self.core_mesh_length])  # initialize flux
-        self.phi_L_old = numpy.ones([self.groups, len(self.ab) / 2])  # initialize left boundary condition
-        self.phi_R_old = numpy.ones([self.groups, len(self.ab) / 2])  # initialize right boundary condition
-        self.angular_flux_edge = numpy.zeros([self.groups, self.core_mesh_length + 1, len(self.ab)])  # initialize edge flux
-        self.angular_flux_center = numpy.zeros([self.groups, self.core_mesh_length, len(self.ab)])  # initialize edge flux
+        self.flux_new = numpy.ones((self.groups, self.core_mesh_length), dtype=numpy.float64)  # initialize flux
+        self.flux_old = numpy.ones((self.groups, self.core_mesh_length), dtype=numpy.float64)  # initialize flux
+        self.phi_L_old = numpy.ones((self.groups, len(self.ab) / 2),
+                                    dtype=numpy.float64)  # initialize left boundary condition
+        self.phi_R_old = numpy.ones((self.groups, len(self.ab) / 2),
+                                    dtype=numpy.float64)  # initialize right boundary condition
+        self.angular_flux_edge = numpy.zeros((self.groups, self.core_mesh_length + 1, len(self.ab)),
+                                             dtype=numpy.float64)  # initialize edge flux
+        self.angular_flux_center = numpy.zeros((self.groups, self.core_mesh_length, len(self.ab)),
+                                               dtype=numpy.float64)  # initialize edge flux
         self.k_old = 1.0  # initialize eigenvalue
-        self.spatial_fission_old = numpy.zeros([self.groups, self.core_mesh_length])  # initialize fission source
-        self.spatial_fission_new = numpy.zeros([self.groups, self.core_mesh_length])  # initialize fission source
-        self.material = [2] * int(self.core_mesh_length)  # material map
-        #self.E = numpy.zeros([self.groups, self.core_mesh_length])  # initialize eddington factors
+        self.k_new = 1.0  # initialize eigenvalue
+        self.spatial_sig_s_out = numpy.zeros((self.groups, self.core_mesh_length),dtype=numpy.float64)
+        self.spatial_fission_old = numpy.zeros((self.groups, self.core_mesh_length),
+                                               dtype=numpy.float64)  # initialize fission source
+        self.spatial_fission_new = numpy.zeros((self.groups, self.core_mesh_length),
+                                               dtype=numpy.float64)  # initialize fission source
+        self.material = material  # material map
+        # self.material = numpy.array([int(2)] * int(self.core_mesh_length), dtype=numpy.int64)  # material map
+        # self.E = numpy.zeros([self.groups, self.core_mesh_length])  # initialize eddington factors
+        self.fission_source_dx = 0.0
 
         # Solver metrics
         self.exit1 = 0  # initialize exit condition
         self.exit2 = 0  # initialize exit condition
         self.flux_iterations = 0  # iteration counter
         self.source_iterations = 0  # iteration counter
-        self.start = 0  # timer
-        self.end = 0  # timer
-
-        # Make material map
-        self.material_map()
 
         # Form spatial matrix for in scatter from other groups.
         self.form_scatter_source()
 
         # Form fission sources for each group.
         self.form_fission_source()
-        self.spatial_fission_old= self.spatial_fission_new
+        self.spatial_fission_old = self.spatial_fission_new
 
         # Form combined source
         self.Q = self.spatial_sig_s_out + self.spatial_fission_old / self.k_old
@@ -79,13 +115,13 @@ class StepCharacteristicSolver:
                 for i in xrange(10):
                     if i + 1 <= len(self.ab) / 2 and j == self.core_mesh_length:
                         self.angular_flux_edge[k][j][i] = self.phi_R_old[k][i]
-                    elif i + 1 > len(ab) / 2 and j == 0:
+                    elif i + 1 > len(self.ab) / 2 and j == 0:
                         self.angular_flux_edge[k][j][i] = self.phi_L_old[k][i - 5]
 
     # With a given flux, the source from scattering is calculated.
     def form_scatter_source(self):
         # Form scattering source.
-        self.spatial_sig_s_out = numpy.zeros([self.groups, self.core_mesh_length])
+        self.spatial_sig_s_out = numpy.zeros((self.groups, self.core_mesh_length), dtype=numpy.float64)
         for i in xrange(self.core_mesh_length):
             for k in xrange(self.groups):
                 self.spatial_sig_s_out[1 - k][i] = self.dx * self.flux_old[k][i] * self.sig_s_out[k][self.material[i]]
@@ -93,7 +129,7 @@ class StepCharacteristicSolver:
     # With a given flux, the source from fission is calculated.
     def form_fission_source(self):
         # Form fission source.
-        self.spatial_fission_new = numpy.zeros([self.groups, self.core_mesh_length])
+        self.spatial_fission_new = numpy.zeros((self.groups, self.core_mesh_length), dtype=numpy.float64)
         for i in xrange(self.core_mesh_length):
             for k in xrange(self.groups):
                 for h in xrange(self.groups):
@@ -103,6 +139,7 @@ class StepCharacteristicSolver:
                     self.spatial_fission_new[k][i] = self.spatial_fission_new[k][i] + self.fission_source_dx
 
     # Generate a standard pin assembly material map of a 2 assembly problem.
+    # Note: not used anymore
     def material_map(self):
 
         for i in xrange(8):
@@ -129,7 +166,7 @@ class StepCharacteristicSolver:
     def assign_boundary_condition(self):
         # Redefine angular flux at boundaries.
         for k in xrange(self.groups):
-            for j in [0, self.core_mesh_length]:
+            for j in xrange(0, self.core_mesh_length+1):
                 for i in xrange(10):
                     if i + 1 <= len(self.ab) / 2 and j == self.core_mesh_length:
                         self.angular_flux_edge[k][j][i] = self.angular_flux_edge[k][j][len(self.ab) - i - 1]
@@ -158,7 +195,7 @@ class StepCharacteristicSolver:
                     self.angular_flux_center[k][i][z] = n / d
 
             for z in xrange(0, 5):
-                for i in reversed(xrange(1, self.core_mesh_length + 1)):
+                for i in range(self.core_mesh_length, 0, -1):
                     self.angular_flux_edge[k][i - 1][z] = self.angular_flux_edge[k][i][z] * numpy.exp(
                         -self.sig_t[k][self.material[i - 1]] * self.dx / abs(self.ab[z])) + (
                                                                   (self.dx * self.sig_s_in[k][
@@ -182,14 +219,13 @@ class StepCharacteristicSolver:
     def source_iteration(self):
 
         # New eigenvalue.
-        self.k_new = self.k_old * sum(self.spatial_fission_new[0][:]) / sum(self.spatial_fission_old[0][:])
+        self.k_new = self.k_old * numpy.sum(self.spatial_fission_new[0][:]) / numpy.sum(self.spatial_fission_old[0][:])
 
         # New source.
         self.Q = (self.spatial_sig_s_out + self.spatial_fission_new / self.k_new)
 
     # Using all the methods above, solve for an eigenvalue and flux with defined convergence criteria.
     def solve(self):
-        self.start = time()  # start timing
         print "Sit tight. This takes a while."
 
         while self.exit2 == 0:  # source convergence
@@ -202,17 +238,15 @@ class StepCharacteristicSolver:
                 self.flux_iteration()  # do a flux iteration
 
                 # Check for convergence
-                if abs(max(((self.flux_new[0][:] - self.flux_old[0][:]) / self.flux_new[0][:]))) < 1E-6 and abs(
-                        max(((self.flux_new[1][:] - self.flux_old[1][:]) / self.flux_new[1][:]))) < 1E-6:
+                if abs(numpy.max(((self.flux_new[0][:] - self.flux_old[0][:]) / self.flux_new[0][:]))) < 1E-6 and abs(
+                        numpy.max(((self.flux_new[1][:] - self.flux_old[1][:]) / self.flux_new[1][:]))) < 1E-6:
                     self.exit1 = 1  # exit flux iteration
                     self.flux_old = self.flux_new # assign flux
 
                 else:
                     self.flux_old = self.flux_new  # assign flux
-                    self.flux_new = numpy.zeros([self.groups, self.core_mesh_length])  # reset new_flux
+                    self.flux_new = numpy.zeros((self.groups, self.core_mesh_length), dtype=numpy.float64)  # reset new_flux
                     self.assign_boundary_condition()
-
-            print 'Flux converged: {0} total iterations'.format(self.flux_iterations)
 
             # Form scattering source.
             self.form_scatter_source()
@@ -224,24 +258,24 @@ class StepCharacteristicSolver:
             self.source_iteration()
 
             # Check for convergence of new eigen value and fission source
-            if abs(self.k_new - self.k_old) / self.k_old < 1.0E-5 and max(
+            if abs(self.k_new - self.k_old) / self.k_old < 1.0E-5 and numpy.max(
                     self.spatial_fission_old[0][:] - self.spatial_fission_new[0][:]) < 1.0E-5:
 
-                self.exit2 = 1 # exit source iteration
-                self.flux_new = self.flux_new / (sum(self.flux_new)) # normalize flux
-                self.end = time() # timing end point
+                self.exit2 = 1  # exit source iteration
+                self.flux_new = self.flux_new / (numpy.sum(self.flux_new)) # normalize flux
 
             else:
 
                 # Reassign parameters to iterate again.
                 self.k_old = self.k_new
-                self.spatial_sig_s_out = numpy.zeros([self.groups, self.core_mesh_length])
-                self.flux_new = numpy.ones([self.groups, self.core_mesh_length])
+                self.spatial_sig_s_out = numpy.zeros((self.groups, self.core_mesh_length), dtype=numpy.float64)
+                self.flux_new = numpy.ones((self.groups, self.core_mesh_length), dtype=numpy.float64)
                 self.spatial_fission_old = self.spatial_fission_new
-                self.spatial_fission_new = numpy.zeros([self.groups, self.core_mesh_length])
-                self.exit1 = 0 # reenter flux iteration loop.
+                self.spatial_fission_new = numpy.zeros((self.groups, self.core_mesh_length), dtype=numpy.float64)
+                self.exit1 = 0  # reenter flux iteration loop.
 
     # Plot and display results.
+    # Note: doesn't work with numba
     def results(self):
 
         print 'Eigenvalue: {0}'.format(self.k_new)
