@@ -7,8 +7,7 @@ import numpy as np
 
 def read_csv(filename):
 
-    """The read_csv function takes an input file, and returns a data set typically
-    used when solving a 1D radiation transport problems.
+    """Takes an input file, and returns a data set typically used when solving a 1D radiation transport problems.
 
         The structure of much of the returned data will depend on the number of materials present
         and the number of energy groups. For example, if there were 3 unique materials and 2 energy groups,
@@ -81,7 +80,7 @@ def read_csv(filename):
 
 def assign_cross_sections(data, groups, unique_materials):
 
-    """The assign_cross_sections function is used to unpack cross section and nuclear data from an input file.
+    """Unpack cross section and nuclear data from an input file.
 
         Args:
             data (float [][]): raw data taken from an input file.
@@ -128,7 +127,7 @@ def assign_cross_sections(data, groups, unique_materials):
 
 def create_material_map(data, assemblies, assembly_types, assembly_cells, key_length, cells):
 
-    """The create_material_map function is used to generate a global material map.
+    """Generate a global material map.
 
         Args:
             data (float [][]): raw data taken from an input file.
@@ -180,7 +179,7 @@ def create_material_map(data, assemblies, assembly_types, assembly_cells, key_le
 
 def assign_key_length(data, assembly_types):
 
-    """The assign_key_length function is used to unpack the key length parameters given in the input file.
+    """Unpack the key length parameters given in the input file.
 
         Args:
             data (float [][]): raw data taken from an input file.
@@ -201,5 +200,4 @@ def assign_key_length(data, assembly_types):
     except ValueError:
         raise ValueError("The input file may have incorrect data types. Make sure the key lengths are correctly "
                          "formatted.")
-
     return key_length
